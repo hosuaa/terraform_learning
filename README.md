@@ -31,7 +31,7 @@ We will create a terraform file that after running will load up our app instance
 3. Since terraform was added to our path, we can run terraform anywhere. Create a directory for your terraform files and in that create a `main.tf` (in the folder run `nano main.tf`)
 4. We can start writing the terraform script
 
-### Script
+### Script to load basic instance
 
 Comments start with `#`
 
@@ -56,7 +56,7 @@ Now provide the information for the kind of service you want from the cloud prov
 # which service (ec2 instance)
 resource "aws_instance" "app_instance"{
 # which ami
-        ami = "ami-02f0341ac93c96375"
+        ami = "frenkvlw"
 # which controller (micro)
         instance_type = "t2.micro"
 # associate public ip
@@ -71,7 +71,19 @@ resource "aws_instance" "app_instance"{
 :boom: :warning: **IMPORTANT** :boom: :warning:  
 
 - NEVER hardcode your credentials in this file. ALWAYS set your credentials as environment variables
-- DO NOT PUSH the folder containing the terraform script to GitHub until you make the correct `.gitignore` file. This is because additional files are created that store the access credentials as backup, and so they would be exposed if pushed. 
+- DO NOT PUSH the folder containing the terraform script to GitHub until you make the correct `.gitignore` file. This is because additional files are created that store the access credentials as backup, and so they would be exposed if pushed.
+
+### The gitignore
+
+The files to remember to include in the .gitignore:
+```
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+```
+
+There are some others we should include like `variable.tf` too.
 
 Now we can run `terraform plan`. This is similar to right before launching an instance where we can see a summary of what will be made:
 
@@ -86,3 +98,131 @@ Afterwards if we go to our instances on AWS, we should see an instance loading w
 To terminate the instance, run `terraform destroy`.
 
 For more commands, run `terraform`.
+
+### VPC, subnets and security groups for the instances
+
+Our app instance was only deployed with the default security group (so only SSH allowed). We would also like to allow 80 and 3000, as well as deploy a DB instance that allows 22 and 27017. We do this by creating a VPC (in our case, the IP is 10.0.0.0/16) and then we can create a security group and assign it to the VPC.
+
+It is also a good idea to create subnets - a public and private subnet - for the app and db instances so that we can configure routing for the private subnet in the future. For now they are identical.
+
+To create a VPC referred to as main in the code (called joshual-vpc in the AWS console):
+```tf
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+
+  tags = {
+    Name = "joshual-vpc"
+  }
+
+}
+```
+
+Now we can create subnets to divide the VPC:
+
+```tf
+resource "aws_subnet" "app_subnet" {
+  # can use this to refer to the vpc above (since we named it "main") 
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.6.0/24"
+
+  tags = {
+    Name = "joshual-app-subnet"
+  }
+}
+
+resource "aws_subnet" "db_subnet" {
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.16.0/24"
+
+  tags = {
+    Name = "joshual-db-subnet"
+  }
+}
+```
+
+Now we can create the security groups. In the definition of the group, we can add the rules (ingress for inbound, egress for outbound). Remember we refer to the VPC to assign security groups.
+```tf
+# create security group
+resource "aws_security_group" "app_sg" {
+  name        = "joshual_app_sg__allow_ssh_http_3000"
+  description = "Allow TLS inbound traffic and all outbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  # this is how you can add a rule to the security group. ingress for inbound, egress for outbound
+  ingress {
+    description = "Allow SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow 3000 for Node"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "joshual_app_sg__allow_ssh_http_3000"
+  }
+
+}
+```
+Finally in our instance definition we add the subnet and the security groups so it uses those:
+
+```tf
+resource "aws_instance" "app_instance"{
+  ...
+  subnet_id = aws_subnet.app_subnet.id
+  # give the security group
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
+  ...
+}
+```
+
+## Variables
+
+We can use variables in Terraform similarily to Python.
+
+Lets say we want to push our code to GitHub, including our `main.tf` file. In that file, in the instance definition, we had potentially sensitive information, such as the instance type, AMI used and so on. To fix this, we can use variables. We save our variables in another file called `variable.tf`. In that, we can define variables e.g.:
+
+```tf
+variable "app_ami_id" {
+
+    default = "ami-enfwef"
+}
+```
+
+Now in `main.tf` we can refer to the variable directly like `ami = var.app_ami_id`.
+
+We still have to make sure people do not have access to the `variable.tf` file, so include it in the `.gitignore` along with the other files.
+
+## Desired State vs Current State
+
+All the work we have done so far has been on our `main.tf` file, a configuration file where we code how we want terraform to build our architecture. This is the desired state.
+
+When we run `terraform init` a few state files are made, including `terraform.tfstate`. This is a state file that hasn't been configured yet. When we code our desired state and run `terraform plan`, terraform reads the configuration files, as well as the current state from the state file. It then compares the desired state with the current state and then shows you how it will bring the current state up to the desired state. Finally running `terraform apply` actually applies the changes and brings the current state to the desired state. The state file is then updated to be the desired state.
+
+We can run commands like `terraform state list`, `terraform state show`, `terraform state mv` and `terraform state rm` to manually change the state if needed.
+
+### Terraform architecture
+
+![image](2024_05_17_0lp_Kleki.png)
