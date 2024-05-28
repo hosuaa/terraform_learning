@@ -226,3 +226,21 @@ We can run commands like `terraform state list`, `terraform state show`, `terraf
 ### Terraform architecture
 
 ![image](2024_05_17_0lp_Kleki.png)
+
+## Terraform Multi-Cloud deployment
+
+As shown in the diagram, we can, in a singular terraform file, deploy multiple layers of infrastructure over mutliple cloud providers. For example, we could deploy our instances on AWS as well as deploy a GitHub repository at the same time. And when we `terraform destroy`, all infrastructure created is deleted.
+
+### Deploying a GitHub repository with Terraform
+
+1. Generate a Personal Access Token (PAT) on GitHub:
+   1. Goto Setting on your GitHub account -> Developer Settings -> Tokens -> Generate new Token
+  ![alt text](image-4.png)
+  ![alt text](image-5.png)
+  2. Give it the repo scope as well as the ability to delete repos (so it can deploy and destroy the repository generated)
+  3. Click generate and save the token for later (you will not be able to see it again)
+2. Now in your `main.tf` file:
+   1. With the `github` provider, create a new resource for a repository with the name of your choosing
+   ![alt text](image-6.png)
+   2. Make sure to use a variable to store the token so that it is not explicitly written in the `main.tf` file. You do not want anyone to have access to your PAT.
+3. Now when running `terraform apply` a GitHub repo is additionally created under your account. 
