@@ -4,6 +4,10 @@ Terraform is an IaC software that allows us to automate deploying instances with
 
 This is incredibly useful if we want to launch multiple instances, as we know that can take a while doing it through the browser interface. 
 
+## Terraform architecture
+
+![image](terraform_architecture.png)
+
 ## Installing Terraform
 
 Download from `https://developer.hashicorp.com/terraform/install?product_intent=terraform`
@@ -223,9 +227,6 @@ When we run `terraform init` a few state files are made, including `terraform.tf
 
 We can run commands like `terraform state list`, `terraform state show`, `terraform state mv` and `terraform state rm` to manually change the state if needed.
 
-### Terraform architecture
-
-![image](2024_05_17_0lp_Kleki.png)
 
 ## Terraform Multi-Cloud deployment
 
