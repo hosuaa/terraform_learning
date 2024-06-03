@@ -6,7 +6,7 @@ This is incredibly useful if we want to launch multiple instances, as we know th
 
 ## Terraform architecture
 
-![image](terraform_architecture.png)
+![image](images/terraform_architecture.png)
 
 ## Installing Terraform
 
@@ -21,7 +21,7 @@ Now add terraform to PATH:
 2. In your system variables, edit Path, then add a new line to the folder that contains terraform e.g. `C:\Users\joshi\terraform\`
 3. Check installation by opening a new cmd and running terraform --version
 
-![alt text](image.png)
+![alt text](images/image.png)
 
 ## Using Terraform to load a new EC2 instance with code
 
@@ -52,7 +52,7 @@ provider "aws"{
 
 After doing this, run `terraform init`. You should see this:
 
-![alt text](image-1.png)
+![alt text](images/image-1.png)
 
 Now provide the information for the kind of service you want from the cloud provider, and how that service will be implemented:
 
@@ -91,11 +91,11 @@ There are some others we should include like `variable.tf` too.
 
 Now we can run `terraform plan`. This is similar to right before launching an instance where we can see a summary of what will be made:
 
-![alt text](image-2.png)
+![alt text](images/image-2.png)
 
 If all looks good, run `terraform apply` then type `yes`. This effectively launches the instance
 
-![alt text](image-3.png)
+![alt text](images/image-3.png)
 
 Afterwards if we go to our instances on AWS, we should see an instance loading with the name given.
 
@@ -223,7 +223,9 @@ We still have to make sure people do not have access to the `variable.tf` file, 
 
 All the work we have done so far has been on our `main.tf` file, a configuration file where we code how we want terraform to build our architecture. This is the desired state.
 
-When we run `terraform init` a few state files are made, including `terraform.tfstate`. This is a state file that hasn't been configured yet. When we code our desired state and run `terraform plan`, terraform reads the configuration files, as well as the current state from the state file. It then compares the desired state with the current state and then shows you how it will bring the current state up to the desired state. Finally running `terraform apply` actually applies the changes and brings the current state to the desired state. The state file is then updated to be the desired state.
+When we run `terraform init`, first of all terraform downloads the plugins for the providers chosen so that terraform will be able to understand the configurations written (through API calls). These are stored in the `.terraform` directory. Additionally a `.terraform.lock.hcl` file is created, which is a lock file that locks the state of the configuration. If we try to change the provider used to one different to the ones in the lock file, terraform will throw an error, to prevent newer versions breaking older code. We can fix this by simply deleting the lock file or running `terraform init -upgrade`.
+
+When we run `terraform plan` a few state files are made, including `terraform.tfstate`. This is a state file that hasn't been configured yet. When we code our desired state and run `terraform plan`, terraform reads the configuration files, as well as the current state from the state file. It then compares the desired state with the current state and then shows you how it will bring the current state up to the desired state. Finally running `terraform apply` actually applies the changes and brings the current state to the desired state. The state file is then updated to be the desired state.
 
 We can run commands like `terraform state list`, `terraform state show`, `terraform state mv` and `terraform state rm` to manually change the state if needed.
 
@@ -236,12 +238,52 @@ As shown in the diagram, we can, in a singular terraform file, deploy multiple l
 
 1. Generate a Personal Access Token (PAT) on GitHub:
    1. Goto Setting on your GitHub account -> Developer Settings -> Tokens -> Generate new Token
-  ![alt text](image-4.png)
-  ![alt text](image-5.png)
+  ![alt text](images/image-4.png)
+  ![alt text](images/image-5.png)
   2. Give it the repo scope as well as the ability to delete repos (so it can deploy and destroy the repository generated)
   3. Click generate and save the token for later (you will not be able to see it again)
 2. Now in your `main.tf` file:
    1. With the `github` provider, create a new resource for a repository with the name of your choosing
-   ![alt text](image-6.png)
+   ![alt text](images/image-6.png)
    2. Make sure to use a variable to store the token so that it is not explicitly written in the `main.tf` file. You do not want anyone to have access to your PAT.
 3. Now when running `terraform apply` a GitHub repo is additionally created under your account. 
+
+### Deploying to remote (Amazon S3)
+
+![image](images/terraform_architecture_s3.png)
+
+All the state files are currently stored on our local machine. This means we can run the terraform commands to deploy only if we are on this specific machine. We could push some of the files to GitHub and so pull them when needed, however as discussed we cannot push the state files or certain other files due to security risks. As a result the architecture is incomplete when using GitHub as the remote repository.
+
+We can fix this by using a more robust storage mechanism. AWS offers S3 (Simple storage service) which can be used for this purpose. Terraform can use S3 as a backend to store the state file.
+- It is a remote storage solution, so that we can access our files from anywhere we have an internet connection (similar to GitHub)
+- The files are stored in an encrypted manner in the same VPC as the EC2 instances, so only those with access to the instances can access the state file.
+- The state file is not saved locally, instead it is saved in the S3 bucket and when we run plan/apply terraform fetches the state from the bucket.
+
+terraform {
+  backend "s3" {
+    bucket = "mybucket" # name of bucket created in s3 (manually)
+    key    = "network/terraform.tfstate" # where the state file will be stored in the bucket
+    region = "eu-west-1"
+  }
+}
+
+- For collaboration, what if two people wanted to perform an operation at the same time? We need to lock the state
+
+### Locking the state
+
+By default a S3 backend does not lock the state when performing an operation, so two people could concurrently perform an operation which could corrupt the state file.
+
+When performing operations locally, a temporary `.terraform.tfstate.lock.info` file is created and when it exists no other operations are allowed to be performed until the first one finishes, in which case the lock file is deleted.
+
+To get S3 to have this result, we need to integrate DynamoDB into our S3 backend. Each value in the table will be a lock file that contains the lock, and while it exists no other operations will be allowed on the state file in S3.
+
+terraform {
+  backend "s3" {
+    bucket = "mybucket" # name of bucket created in s3 (manually)
+    key    = "network/terraform.tfstate" # where the state file will be stored in the bucket
+    region = "eu-west-1"
+    dynamodb_table = "mytable" # name of table created in dynamodb (manually) NOTE remember to set pertition key to `LockID` as specified in documentation when creating the table
+  }
+}
+
+
